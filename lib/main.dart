@@ -55,6 +55,45 @@ class Staff {
   }
 }
 
+class LeaveEntry {
+  final String id;
+  final String staffId;
+  final DateTime startDate;
+  final DateTime endDate;
+  final double unitPerDay; // 1.0 or 0.5
+  final LeaveStatus status;
+
+  LeaveEntry({
+    required this.id,
+    required this.staffId,
+    required this.startDate,
+    required this.endDate,
+    required this.unitPerDay,
+    required this.status,
+  });
+}
+
+enum LeaveStatus { requested, taken }
+
+final List<LeaveEntry> dummyLeaves = [
+  LeaveEntry(
+    id: 'l1',
+    staffId: 's1',
+    startDate: DateTime(2023, 12, 25),
+    endDate: DateTime(2023, 12, 30),
+    unitPerDay: 1.0,
+    status: LeaveStatus.taken,
+  ),
+  LeaveEntry(
+    id: 'l2',
+    staffId: 's1',
+    startDate: DateTime(2024, 1, 10),
+    endDate: DateTime(2024, 1, 12),
+    unitPerDay: 0.5,
+    status: LeaveStatus.requested,
+  ),
+];
+
 final List<Staff> dummyStaff = [
   Staff(
     id: 's1',
@@ -340,10 +379,7 @@ class StaffListScreen extends StatelessWidget {
 }
 
 class StaffDetailsScreen extends StatefulWidget {
-  const StaffDetailsScreen({
-    super.key,
-    required this.staffId,
-  });
+  const StaffDetailsScreen({super.key, required this.staffId});
 
   final String staffId;
 
@@ -352,98 +388,151 @@ class StaffDetailsScreen extends StatefulWidget {
 }
 
 class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
-
   String _formatDate(DateTime date) {
     return '${date.day.toString().padLeft(2, '0')}-'
         '${date.month.toString().padLeft(2, '0')}-'
         '${date.year}';
   }
 
+  double _countDaysForEntry(LeaveEntry entry) {
+    double days = 0.0;
+    DateTime current = entry.startDate;
+
+    while (!current.isAfter(entry.endDate)) {
+      // For now: no weekly-off logic yet (we’ll add it next step)
+      days += entry.unitPerDay;
+      current = current.add(const Duration(days: 1));
+    }
+
+    return days;
+  }
+
   @override
-Widget build(BuildContext context) {
-  final staff = dummyStaff.firstWhere(
-    (s) => s.id == widget.staffId,
-  );
+  Widget build(BuildContext context) {
+    final staff = dummyStaff.firstWhere((s) => s.id == widget.staffId);
+    final staffLeaves = dummyLeaves
+        .where((l) => l.staffId == staff.id)
+        .toList();
+    final takenDays = staffLeaves
+        .where((l) => l.status == LeaveStatus.taken)
+        .fold<double>(0.0, (sum, l) => sum + _countDaysForEntry(l));
 
-  return Scaffold(
-    appBar: AppBar(
-      title: const Text('Staff Details'),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.edit),
-          onPressed: () async {
-            final updatedStaff =
-                await Navigator.of(context).push<Staff>(
-              MaterialPageRoute(
-                builder: (context) => EditStaffScreen(staff: staff),
-              ),
-            );
+    final requestedDays = staffLeaves
+        .where((l) => l.status == LeaveStatus.requested)
+        .fold<double>(0.0, (sum, l) => sum + _countDaysForEntry(l));
 
-            if (updatedStaff != null) {
-              setState(() {
-                final index =
-                    dummyStaff.indexWhere((s) => s.id == staff.id);
-                if (index != -1) {
-                  dummyStaff[index] = updatedStaff;
-                }
-              });
-            }
-          },
-        ),
-      ],
-    ),
-    body: Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Name
-          Text(
-            staff.name,
-            style: Theme.of(context).textTheme.headlineMedium,
+    final allocated = staff.totalLeaveAllocated.toDouble();
+    final balance = allocated - takenDays;
+    final overshoot = balance < 0 ? balance.abs() : 0.0;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Staff Details'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () async {
+              final updatedStaff = await Navigator.of(context).push<Staff>(
+                MaterialPageRoute(
+                  builder: (context) => EditStaffScreen(staff: staff),
+                ),
+              );
+
+              if (updatedStaff != null) {
+                setState(() {
+                  final index = dummyStaff.indexWhere((s) => s.id == staff.id);
+                  if (index != -1) {
+                    dummyStaff[index] = updatedStaff;
+                  }
+                });
+              }
+            },
           ),
-
-          // Nickname (optional)
-          if (staff.nickname != null) ...[
-            const SizedBox(height: 4),
-            Text('Nickname: ${staff.nickname}'),
-          ],
-
-          const SizedBox(height: 8),
-
-          // Role
-          Text(
-            staff.role,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-
-          const SizedBox(height: 16),
-
-          // Start date
-          Text('Joined on: ${_formatDate(staff.startDate)}'),
-
-          const SizedBox(height: 8),
-
-          // Leave allocation
-          Text(
-            'Total Leave Allocated: ${staff.totalLeaveAllocated} days',
-          ),
-
-          const SizedBox(height: 24),
-
-          // Duties
-          const Text(
-            'Agreed Duties',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          for (final duty in staff.agreedDuties)
-            Text('• $duty'),
         ],
       ),
-    ),
-  );
-}
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Name
+            Text(staff.name, style: Theme.of(context).textTheme.headlineMedium),
+
+            // Nickname (optional)
+            if (staff.nickname != null) ...[
+              const SizedBox(height: 4),
+              Text('Nickname: ${staff.nickname}'),
+            ],
+
+            const SizedBox(height: 8),
+
+            // Role
+            Text(staff.role, style: Theme.of(context).textTheme.titleMedium),
+
+            const SizedBox(height: 16),
+
+            // Start date
+            Text('Joined on: ${_formatDate(staff.startDate)}'),
+
+            const SizedBox(height: 8),
+
+            // Leave allocation
+            Text('Total Leave Allocated: ${staff.totalLeaveAllocated} days'),
+
+            const SizedBox(height: 24),
+
+            // Duties
+            const Text(
+              'Agreed Duties',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            for (final duty in staff.agreedDuties) Text('• $duty'),
+
+            const SizedBox(height: 24),
+
+            const Text(
+              'Leave Summary',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => LeaveHistoryScreen(
+                      staffId: staff.id,
+                      staffName: staff.name,
+                    ),
+                  ),
+                );
+              },
+              child: const Text('View Leave History'),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text('Total Allocated: ${allocated.toStringAsFixed(1)} days'),
+            Text('Taken: ${takenDays.toStringAsFixed(1)} days'),
+            Text(
+              'Requested (upcoming): ${requestedDays.toStringAsFixed(1)} days',
+            ),
+
+            const SizedBox(height: 8),
+
+            if (balance >= 0)
+              Text('Balance: ${balance.toStringAsFixed(1)} days')
+            else
+              Text(
+                'Overshoot: ${overshoot.toStringAsFixed(1)} days',
+                style: const TextStyle(color: Colors.red),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class EditStaffScreen extends StatefulWidget {
@@ -453,12 +542,212 @@ class EditStaffScreen extends StatefulWidget {
   @override
   State<EditStaffScreen> createState() => _EditStaffScreenState();
 }
+
 class _EditStaffScreenState extends State<EditStaffScreen> {
+  late String nickname;
+  late String role;
+  late String totalLeaveText;
+  late String dutiesText;
+  late TextEditingController nicknameController;
+  late TextEditingController roleController;
+  late TextEditingController totalLeaveController;
+  late TextEditingController dutiesController;
+
+  @override
+  void initState() {
+    super.initState();
+
+    nicknameController = TextEditingController(
+      text: widget.staff.nickname ?? '',
+    );
+    roleController = TextEditingController(text: widget.staff.role);
+    totalLeaveController = TextEditingController(
+      text: widget.staff.totalLeaveAllocated.toString(),
+    );
+    dutiesController = TextEditingController(
+      text: widget.staff.agreedDuties.join('\n'),
+    );
+
+    roleController.addListener(() {
+      setState(() {});
+    });
+
+    totalLeaveController.addListener(() {
+      setState(() {});
+    });
+
+    dutiesController.addListener(() {
+      setState(() {});
+    });
+    nicknameController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  String? get roleError {
+    if (roleController.text.trim().isEmpty) {
+      return 'Role is required';
+    }
+    return null;
+  }
+
+  String? get leaveError {
+    final value = int.tryParse(totalLeaveController.text);
+    if (value == null || value < 0) {
+      return 'Enter a valid number';
+    }
+    return null;
+  }
+
+  bool get isFormValid {
+    return roleError == null && leaveError == null;
+  }
+
+  @override
+  void dispose() {
+    nicknameController.dispose();
+    roleController.dispose();
+    totalLeaveController.dispose();
+    dutiesController.dispose();
+    super.dispose();
+  }
+
+  void _saveStaff() {
+    final updatedStaff = widget.staff.copyWith(
+      nickname: nicknameController.text.trim().isEmpty
+          ? null
+          : nicknameController.text.trim(),
+      role: roleController.text.trim(),
+      totalLeaveAllocated: int.parse(totalLeaveController.text),
+      agreedDuties: dutiesController.text
+          .split('\n')
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList(),
+    );
+
+    Navigator.pop(context, updatedStaff);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit Staff')),
-      body: const Center(child: Text('Edit form goes here')),
+      appBar: AppBar(
+        title: const Text('Edit Staff'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.check),
+            onPressed: isFormValid ? _saveStaff : null,
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          children: [
+            // Name (read-only)
+            Text(
+              widget.staff.name,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
+
+            const SizedBox(height: 16),
+
+            TextField(
+              decoration: InputDecoration(labelText: 'Nickname'),
+              controller: nicknameController,
+            ),
+
+            const SizedBox(height: 16),
+
+            TextField(
+              decoration: InputDecoration(
+                labelText: 'Role',
+                errorText: roleError,
+              ),
+              controller: roleController,
+            ),
+
+            const SizedBox(height: 16),
+
+            TextField(
+              decoration: InputDecoration(
+                labelText: 'Total Leave Allocated',
+                errorText: leaveError,
+              ),
+              keyboardType: TextInputType.number,
+              controller: totalLeaveController,
+            ),
+
+            const SizedBox(height: 16),
+
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Agreed Duties (one per line)',
+              ),
+              maxLines: 5,
+              controller: dutiesController,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class LeaveHistoryScreen extends StatelessWidget {
+  const LeaveHistoryScreen({
+    super.key,
+    required this.staffId,
+    required this.staffName,
+  });
+
+  final String staffId;
+  final String staffName;
+
+  @override
+  Widget build(BuildContext context) {
+    final staffLeaves = dummyLeaves.where((l) => l.staffId == staffId).toList();
+    String _formatDate(DateTime date) {
+      return '${date.day.toString().padLeft(2, '0')}-'
+          '${date.month.toString().padLeft(2, '0')}-'
+          '${date.year}';
+    }
+
+    double _countDaysForEntry(LeaveEntry entry) {
+      double days = 0.0;
+      DateTime current = entry.startDate;
+
+      while (!current.isAfter(entry.endDate)) {
+        days += entry.unitPerDay;
+        current = current.add(const Duration(days: 1));
+      }
+
+      return days;
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: Text('$staffName — Leave History')),
+      body: staffLeaves.isEmpty
+          ? const Center(child: Text('No leave records yet'))
+          : ListView.builder(
+              itemCount: staffLeaves.length,
+              itemBuilder: (context, index) {
+                final leave = staffLeaves[index];
+
+                return ListTile(
+                  title: Text(
+                    '${_formatDate(leave.startDate)} → ${_formatDate(leave.endDate)}',
+                  ),
+                  subtitle: Text(
+                    leave.status == LeaveStatus.taken ? 'Taken' : 'Requested',
+                  ),
+                  trailing: Text(
+                    '${_countDaysForEntry(leave).toStringAsFixed(1)} d',
+                  ),
+                );
+              },
+            ),
     );
   }
 }
