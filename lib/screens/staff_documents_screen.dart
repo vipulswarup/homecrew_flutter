@@ -41,6 +41,55 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
     });
   }
 
+  Future<bool> _confirmDelete(StaffDocument doc) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete document?'),
+          content: Text(doc.fileName),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    return ok == true;
+  }
+
+  Future<void> _deleteDoc(StaffDocument doc) async {
+    final ok = await _confirmDelete(doc);
+    if (!ok) return;
+
+    setState(() {
+      isLoading = true;
+      status = null;
+    });
+
+    try {
+      await widget.documentService.delete(documentId: doc.id);
+      await _reload();
+    } catch (e) {
+      final message = e is ApiException ? e.message : e.toString();
+      setState(() {
+        status = message;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
+  }
+
   Future<void> _pickAndUpload() async {
     setState(() {
       isLoading = true;
@@ -255,8 +304,19 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
                       return ListTile(
                         title: Text(doc.fileName),
                         subtitle: Text('${doc.fileType} • ${doc.fileSize} B • $created'),
-                        trailing: Icon(
-                          canPreview ? Icons.visibility : Icons.open_in_new,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              canPreview ? Icons.visibility : Icons.open_in_new,
+                            ),
+                            const SizedBox(width: 12),
+                            IconButton(
+                              tooltip: 'Delete',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: isLoading ? null : () => _deleteDoc(doc),
+                            ),
+                          ],
                         ),
                         onTap: isLoading ? null : () => _openDoc(doc),
                       );

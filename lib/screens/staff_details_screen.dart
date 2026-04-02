@@ -170,6 +170,39 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
                             contentPadding: EdgeInsets.zero,
                             title: Text(d.fileName),
                             subtitle: Text(d.fileType),
+                            trailing: IconButton(
+                              tooltip: 'Delete',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () async {
+                                final ok = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) {
+                                    return AlertDialog(
+                                      title: const Text('Delete document?'),
+                                      content: Text(d.fileName),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.of(context).pop(false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        ElevatedButton(
+                                          onPressed: () =>
+                                              Navigator.of(context).pop(true),
+                                          child: const Text('Delete'),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                );
+                                if (ok == true) {
+                                  await _documentService.delete(
+                                    documentId: d.id,
+                                  );
+                                  await _reload();
+                                }
+                              },
+                            ),
                           ),
                         if (docs.length > 3)
                           Text('And ${docs.length - 3} more...'),
