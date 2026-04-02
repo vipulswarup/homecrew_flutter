@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../api/api_exception.dart';
+import '../models/document_upload.dart';
 import '../services/document_service.dart';
 
 class StaffDocumentsScreen extends StatefulWidget {
@@ -45,6 +46,11 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
       String fileName = file.name;
       String mime = _guessMime(fileName);
 
+      DocumentService.logEvent('ui.file_selected', {
+        'file_name': fileName,
+        'path': path,
+      });
+
       if (DocumentService.isHeicLike(fileName)) {
         final outPath = '${Directory.systemTemp.path}/${DateTime.now().millisecondsSinceEpoch}.jpg';
         toUpload = await DocumentService.convertHeicToJpegMac(
@@ -53,22 +59,41 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
         );
         fileName = fileName.replaceAll(RegExp(r'\\.(heic|heif)$', caseSensitive: false), '.jpg');
         mime = 'image/jpeg';
+        DocumentService.logEvent('ui.heic_converted', {
+          'output_path': outPath,
+          'file_name': fileName,
+          'mime': mime,
+        });
       }
 
       final bytes = await toUpload.readAsBytes();
-      final init = await widget.documentService.createUploadUrl(
-        householdId: widget.householdId,
-        staffId: widget.staffId,
-        fileName: fileName,
-        fileType: mime,
-        fileSize: bytes.length,
-      );
+      DocumentService.logEvent('ui.file_bytes_ready', {
+        'file_name': fileName,
+        'mime': mime,
+        'bytes': bytes.length,
+      });
+      DocumentUploadInit init;
+      try {
+        init = await widget.documentService.createUploadUrl(
+          householdId: widget.householdId,
+          staffId: widget.staffId,
+          fileName: fileName,
+          fileType: mime,
+          fileSize: bytes.length,
+        );
+      } catch (e) {
+        throw StateError('upload-url failed: $e');
+      }
 
-      await widget.documentService.uploadToPresignedUrl(
-        uploadUrl: init.uploadUrl,
-        bytes: bytes,
-        contentType: mime,
-      );
+      try {
+        await widget.documentService.uploadToPresignedUrl(
+          uploadUrl: init.uploadUrl,
+          bytes: bytes,
+          contentType: mime,
+        );
+      } catch (e) {
+        throw StateError('PUT upload failed: $e');
+      }
 
       setState(() {
         status = 'Uploaded. document_id=${init.documentId}';
