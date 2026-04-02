@@ -4,9 +4,11 @@
 <dict>
 	<key>com.apple.security.app-sandbox</key>
 	<true/>
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)com.example.homecrewFlutter</string>
+		<string>$(AppIdentifierPrefix)com.eisenvault.HomeCrew</string>
 	</array>
 </dict>
 </plist>

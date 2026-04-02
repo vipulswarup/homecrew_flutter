@@ -1,15 +1,19 @@
 import 'package:flutter/material.dart';
 
+import '../api/api_client.dart';
+import '../api/api_exception.dart';
 import '../models/staff.dart';
-import '../models/leave_entry.dart';
-import '../services/dummy_data.dart';
+import '../services/salary_service.dart';
+import '../services/staff_service.dart';
 import 'edit_staff_screen.dart';
-import 'leave_history_screen.dart';
-import '../utils/leave_utils.dart';
+import 'salary_revisions_screen.dart';
+import 'staff_documents_screen.dart';
+import '../services/document_service.dart';
 
 class StaffDetailsScreen extends StatefulWidget {
-  const StaffDetailsScreen({super.key, required this.staffId});
+  const StaffDetailsScreen({super.key, required this.api, required this.staffId});
 
+  final ApiClient api;
   final String staffId;
 
   @override
@@ -17,131 +21,136 @@ class StaffDetailsScreen extends StatefulWidget {
 }
 
 class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
+  late final StaffService _staffService = StaffService(api: widget.api);
+  late final SalaryService _salaryService = SalaryService(api: widget.api);
+  late final DocumentService _documentService = DocumentService(api: widget.api);
+  late Future<Staff> _load = _staffService.getById(widget.staffId);
 
+  Future<void> _reload() async {
+    setState(() {
+      _load = _staffService.getById(widget.staffId);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final staff = dummyStaff.firstWhere((s) => s.id == widget.staffId);
-    final staffLeaves = dummyLeaves
-        .where((l) => l.staffId == staff.id)
-        .toList();
-    final takenDays = staffLeaves
-        .where((l) => l.status == LeaveStatus.taken)
-        .fold<double>(0.0, (sum, l) => sum + countDaysForEntry(l));
-
-    final requestedDays = staffLeaves
-        .where((l) => l.status == LeaveStatus.requested)
-        .fold<double>(0.0, (sum, l) => sum + countDaysForEntry(l));
-
-    final allocated = staff.totalLeaveAllocated.toDouble();
-    final balance = allocated - takenDays;
-    final overshoot = balance < 0 ? balance.abs() : 0.0;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Staff Details'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _reload,
+          ),
+          IconButton(
             icon: const Icon(Icons.edit),
             onPressed: () async {
+              final current = await _load;
+              if (!context.mounted) return;
               final updatedStaff = await Navigator.of(context).push<Staff>(
                 MaterialPageRoute(
-                  builder: (context) => EditStaffScreen(staff: staff),
+                  builder: (context) => EditStaffScreen(staff: current),
                 ),
               );
 
               if (updatedStaff != null) {
-                setState(() {
-                  final index = dummyStaff.indexWhere((s) => s.id == staff.id);
-                  if (index != -1) {
-                    dummyStaff[index] = updatedStaff;
-                  }
-                });
+                await _staffService.update(
+                  staffId: updatedStaff.id,
+                  nickname: updatedStaff.nickname,
+                  role: updatedStaff.role,
+                  startDateIso:
+                      updatedStaff.startDate.toIso8601String().split('T').first,
+                  totalLeaveAllocated: updatedStaff.totalLeaveAllocated,
+                  agreedDuties: updatedStaff.agreedDuties,
+                );
+                await _reload();
               }
             },
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Name
-            Text(staff.name, style: Theme.of(context).textTheme.headlineMedium),
+      body: FutureBuilder<Staff>(
+        future: _load,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            final err = snapshot.error;
+            final message = err is ApiException ? err.message : '$err';
+            return Center(child: Text(message, textAlign: TextAlign.center));
+          }
 
-            // Nickname (optional)
-            if (staff.nickname != null) ...[
-              const SizedBox(height: 4),
-              Text('Nickname: ${staff.nickname}'),
-            ],
+          final staff = snapshot.data;
+          if (staff == null) {
+            return const Center(child: Text('Staff not found'));
+          }
 
-            const SizedBox(height: 8),
+          final joined = staff.startDate.toIso8601String().split('T').first;
 
-            // Role
-            Text(staff.role, style: Theme.of(context).textTheme.titleMedium),
-
-            const SizedBox(height: 16),
-
-            // Start date
-            Text('Joined on: ${formatDate(staff.startDate)}'),
-
-            const SizedBox(height: 8),
-
-            // Leave allocation
-            Text('Total Leave Allocated: ${staff.totalLeaveAllocated} days'),
-
-            const SizedBox(height: 24),
-
-            // Duties
-            const Text(
-              'Agreed Duties',
-              style: TextStyle(fontWeight: FontWeight.bold),
+          return Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  staff.name,
+                  style: Theme.of(context).textTheme.headlineMedium,
+                ),
+                if (staff.nickname != null && staff.nickname!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text('Nickname: ${staff.nickname}'),
+                ],
+                const SizedBox(height: 8),
+                Text(staff.role, style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 16),
+                Text('Joined on: $joined'),
+                const SizedBox(height: 8),
+                Text('Total Leave Allocated: ${staff.totalLeaveAllocated} days'),
+                const SizedBox(height: 24),
+                const Text(
+                  'Agreed Duties',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                if (staff.agreedDuties.isEmpty)
+                  const Text('None')
+                else
+                  for (final duty in staff.agreedDuties) Text('• $duty'),
+                const SizedBox(height: 24),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => SalaryRevisionsScreen(
+                          salaryService: _salaryService,
+                          staffId: staff.id,
+                          staffName: staff.name,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('View salary revisions'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => StaffDocumentsScreen(
+                          documentService: _documentService,
+                          householdId: staff.householdId,
+                          staffId: staff.id,
+                          staffName: staff.name,
+                        ),
+                      ),
+                    );
+                  },
+                  child: const Text('Upload a document'),
+                ),
+              ],
             ),
-            const SizedBox(height: 8),
-            for (final duty in staff.agreedDuties) Text('• $duty'),
-
-            const SizedBox(height: 24),
-
-            const Text(
-              'Leave Summary',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (context) => LeaveHistoryScreen(
-                      staffId: staff.id,
-                      staffName: staff.name,
-                    ),
-                  ),
-                );
-              },
-              child: const Text('View Leave History'),
-            ),
-
-            const SizedBox(height: 8),
-
-            Text('Total Allocated: ${allocated.toStringAsFixed(1)} days'),
-            Text('Taken: ${takenDays.toStringAsFixed(1)} days'),
-            Text(
-              'Requested (upcoming): ${requestedDays.toStringAsFixed(1)} days',
-            ),
-
-            const SizedBox(height: 8),
-
-            if (balance >= 0)
-              Text('Balance: ${balance.toStringAsFixed(1)} days')
-            else
-              Text(
-                'Overshoot: ${overshoot.toStringAsFixed(1)} days',
-                style: const TextStyle(color: Colors.red),
-              ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }

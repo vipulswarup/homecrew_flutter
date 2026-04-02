@@ -1,21 +1,32 @@
 import 'package:flutter/material.dart';
 
+import '../api/api_exception.dart';
+import '../services/auth_service.dart';
+import 'signup_screen.dart';
+import 'verify_email_screen.dart';
+
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.onLogin});
-  final VoidCallback onLogin;
+  const LoginScreen({
+    super.key,
+    required this.auth,
+    required this.onLoggedIn,
+  });
+  final AuthService auth;
+  final VoidCallback onLoggedIn;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  String username = "";
+  String email = "";
   String password = "";
   bool isLoading = false;
+  String? submitError;
 
-  String? get usernameError {
-    if (username.isEmpty) {
-      return 'Username is required';
+  String? get emailError {
+    if (email.isEmpty) {
+      return 'Email is required';
     }
     return null;
   }
@@ -33,24 +44,33 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _submitLogin() async {
     setState(() {
       isLoading = true;
+      submitError = null;
     });
 
-    // Simulate network delay
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      await widget.auth.login(email: email, password: password);
+      if (!mounted) return;
+      widget.onLoggedIn();
+    } catch (e) {
+      if (!mounted) return;
+      final message = e is ApiException ? e.message : e.toString();
+      setState(() {
+        submitError = message;
+      });
+    }
 
+    if (!mounted) return;
     setState(() {
       isLoading = false;
     });
-
-    widget.onLogin();
   }
 
   @override
   Widget build(BuildContext context) {
     final bool isFormValid =
-        username.isNotEmpty &&
+        email.isNotEmpty &&
         password.isNotEmpty &&
-        usernameError == null &&
+        emailError == null &&
         passwordError == null;
     return Scaffold(
       body: Padding(
@@ -61,12 +81,12 @@ class _LoginScreenState extends State<LoginScreen> {
             TextField(
               onChanged: (value) {
                 setState(() {
-                  username = value;
+                  email = value;
                 });
               },
               decoration: InputDecoration(
-                labelText: "Username",
-                errorText: usernameError,
+                labelText: "Email",
+                errorText: emailError,
               ),
             ),
             const SizedBox(height: 16.0),
@@ -83,6 +103,13 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ),
             const SizedBox(height: 16.0),
+            if (submitError != null) ...[
+              Text(
+                submitError!,
+                style: const TextStyle(color: Colors.red),
+              ),
+              const SizedBox(height: 16.0),
+            ],
 
             ElevatedButton(
               onPressed: (!isFormValid || isLoading) ? null : _submitLogin,
@@ -93,6 +120,32 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Text("Login"),
+            ),
+            const SizedBox(height: 12.0),
+            TextButton(
+              onPressed: isLoading
+                  ? null
+                  : () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => SignupScreen(auth: widget.auth),
+                        ),
+                      );
+                    },
+              child: const Text('Create account'),
+            ),
+            TextButton(
+              onPressed: isLoading
+                  ? null
+                  : () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              VerifyEmailScreen(auth: widget.auth),
+                        ),
+                      );
+                    },
+              child: const Text('Verify email (token)'),
             ),
           ],
         ),
