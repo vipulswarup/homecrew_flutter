@@ -2,9 +2,12 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api/api_exception.dart';
 import '../models/document_upload.dart';
+import '../models/staff_document.dart';
+import '../screens/document_preview_screen.dart';
 import '../services/document_service.dart';
 
 class StaffDocumentsScreen extends StatefulWidget {
@@ -28,6 +31,15 @@ class StaffDocumentsScreen extends StatefulWidget {
 class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
   bool isLoading = false;
   String? status;
+  late Future<List<StaffDocument>> _load = widget.documentService.listForStaff(
+    staffId: widget.staffId,
+  );
+
+  Future<void> _reload() async {
+    setState(() {
+      _load = widget.documentService.listForStaff(staffId: widget.staffId);
+    });
+  }
 
   Future<void> _pickAndUpload() async {
     setState(() {
@@ -98,6 +110,7 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
       setState(() {
         status = 'Uploaded. document_id=${init.documentId}';
       });
+      await _reload();
     } catch (e) {
       final message = e is ApiException ? e.message : e.toString();
       setState(() {
@@ -107,6 +120,72 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
       setState(() {
         isLoading = false;
       });
+    }
+  }
+
+  bool _isPreviewableInApp(StaffDocument doc) {
+    final t = doc.fileType.toLowerCase();
+    return t == 'application/pdf' || t == 'image/jpeg' || t == 'image/png';
+  }
+
+  Future<void> _openDoc(StaffDocument doc) async {
+    setState(() {
+      isLoading = true;
+      status = null;
+    });
+    try {
+      final downloadUrl =
+          await widget.documentService.getDownloadUrl(documentId: doc.id);
+
+      if (!_isPreviewableInApp(doc)) {
+        final uri = Uri.parse(downloadUrl);
+        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!ok) {
+          throw StateError('Could not open in external viewer');
+        }
+        return;
+      }
+
+      final bytes = await widget.documentService.downloadFromPresignedUrl(
+        downloadUrl,
+      );
+
+      if (doc.fileType.toLowerCase() == 'application/pdf') {
+        final file = File(
+          '${Directory.systemTemp.path}/${doc.id}.pdf',
+        );
+        await file.writeAsBytes(bytes, flush: true);
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DocumentPreviewScreen.pdf(
+              title: doc.fileName,
+              file: file,
+            ),
+          ),
+        );
+      } else {
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DocumentPreviewScreen.image(
+              title: doc.fileName,
+              imageBytes: bytes,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      final message = e is ApiException ? e.message : e.toString();
+      setState(() {
+        status = message;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
   }
 
@@ -121,7 +200,12 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.staffName} — Documents')),
+      appBar: AppBar(
+        title: Text('${widget.staffName} — Documents'),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _reload),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -139,6 +223,48 @@ class _StaffDocumentsScreenState extends State<StaffDocumentsScreen> {
             ),
             const SizedBox(height: 16),
             if (status != null) Text(status!),
+            const SizedBox(height: 16),
+            Expanded(
+              child: FutureBuilder<List<StaffDocument>>(
+                future: _load,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    final err = snapshot.error;
+                    final message = err is ApiException ? err.message : '$err';
+                    return Center(
+                      child: Text(message, textAlign: TextAlign.center),
+                    );
+                  }
+                  final docs = snapshot.data ?? const [];
+                  if (docs.isEmpty) {
+                    return const Center(child: Text('No documents uploaded yet.'));
+                  }
+
+                  return ListView.separated(
+                    itemCount: docs.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final doc = docs[index];
+                      final canPreview = _isPreviewableInApp(doc);
+                      final created =
+                          doc.createdAt.toIso8601String().replaceFirst('T', ' ');
+                      return ListTile(
+                        title: Text(doc.fileName),
+                        subtitle: Text('${doc.fileType} • ${doc.fileSize} B • $created'),
+                        trailing: Icon(
+                          canPreview ? Icons.visibility : Icons.open_in_new,
+                        ),
+                        onTap: isLoading ? null : () => _openDoc(doc),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),

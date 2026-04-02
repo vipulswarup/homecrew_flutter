@@ -9,6 +9,7 @@ import 'edit_staff_screen.dart';
 import 'salary_revisions_screen.dart';
 import 'staff_documents_screen.dart';
 import '../services/document_service.dart';
+import '../models/staff_document.dart';
 
 class StaffDetailsScreen extends StatefulWidget {
   const StaffDetailsScreen({super.key, required this.api, required this.staffId});
@@ -25,10 +26,13 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
   late final SalaryService _salaryService = SalaryService(api: widget.api);
   late final DocumentService _documentService = DocumentService(api: widget.api);
   late Future<Staff> _load = _staffService.getById(widget.staffId);
+  late Future<List<StaffDocument>> _docsLoad =
+      _documentService.listForStaff(staffId: widget.staffId);
 
   Future<void> _reload() async {
     setState(() {
       _load = _staffService.getById(widget.staffId);
+      _docsLoad = _documentService.listForStaff(staffId: widget.staffId);
     });
   }
 
@@ -90,8 +94,7 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
 
           return Padding(
             padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: ListView(
               children: [
                 Text(
                   staff.name,
@@ -132,6 +135,48 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
                   },
                   child: const Text('View salary revisions'),
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Documents',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                FutureBuilder<List<StaffDocument>>(
+                  future: _docsLoad,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState != ConnectionState.done) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: LinearProgressIndicator(),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Text(
+                        'Failed to load documents: ${snapshot.error}',
+                        style: const TextStyle(color: Colors.red),
+                      );
+                    }
+                    final docs = snapshot.data ?? const [];
+                    if (docs.isEmpty) {
+                      return const Text('No documents uploaded yet.');
+                    }
+
+                    final preview = docs.take(3).toList();
+                    return Column(
+                      children: [
+                        for (final d in preview)
+                          ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(d.fileName),
+                            subtitle: Text(d.fileType),
+                          ),
+                        if (docs.length > 3)
+                          Text('And ${docs.length - 3} more...'),
+                      ],
+                    );
+                  },
+                ),
                 TextButton(
                   onPressed: () {
                     Navigator.of(context).push(
@@ -145,7 +190,7 @@ class _StaffDetailsScreenState extends State<StaffDetailsScreen> {
                       ),
                     );
                   },
-                  child: const Text('Upload a document'),
+                  child: const Text('Open documents'),
                 ),
               ],
             ),

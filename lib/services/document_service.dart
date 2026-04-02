@@ -1,11 +1,11 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../api/api_client.dart';
 import '../models/document_upload.dart';
+import '../models/staff_document.dart';
 
 class DocumentService {
   DocumentService({required ApiClient api}) : _api = api;
@@ -55,6 +55,18 @@ class DocumentService {
       'upload_url': redactUrl(init.uploadUrl),
     });
     return init;
+  }
+
+  Future<List<StaffDocument>> listForStaff({required String staffId}) async {
+    final resp = await _api.get<dynamic>('/staff/$staffId/documents');
+    final data = resp.data;
+    if (data is List) {
+      return data
+          .whereType<Map>()
+          .map((e) => StaffDocument.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+    }
+    return const [];
   }
 
   Future<void> uploadToPresignedUrl({
